@@ -6,7 +6,9 @@ WORKDIR /pipeline_lab
 
 # Copy the compiled Java .jar file into the container at /app
 # Assumes your build tool (like Maven) creates the jar in the target folder
-COPY target/*.jar app.jar
+#COPY target/*.jar app.jar
+COPY target/demo-0.0.1-SNAPSHOT.jar app.jar
+
 
 # Make port 8080 available to the world outside this container
 EXPOSE 8080
