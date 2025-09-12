@@ -27,7 +27,7 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
-          role-to-assume: 'arn:aws:iam::amalitech-labs-account-014:role/YourGitHubOidcRoleName'
+          role-to-assume: 'arn:aws:iam::6772-7609-1734:role/YourGitHubOidcRoleName'
           aws-region: 'eu-central-1'
 
       # Step 3: Log in to the Amazon ECR registry
