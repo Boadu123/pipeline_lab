@@ -54,17 +54,18 @@ jobs:
         run: |
           EXECUTION_ROLE_ARN=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='TaskExecutionRoleArn'].OutputValue" --output text)
           LOG_GROUP=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='LogGroupName'].OutputValue" --output text)
-          
-          sed -i "s|%IMAGE_URI%|${{ steps.build-image.outputs.image_uri }}|g" taskdef.template.json
-          sed -i "s|%EXECUTION_ROLE_ARN%|$EXECUTION_ROLE_ARN|g" taskdef.template.json
-          sed -i "s|%LOG_GROUP%|$LOG_GROUP|g" taskdef.template.json
-          sed -i "s|%AWS_REGION%|eu-central-1|g" taskdef.template.json
-          mv taskdef.template.json taskdef.json
-          
-          # Zip the final files for CodePipeline
-          zip deployment_package.zip appspec.yaml taskdef.json
-          
-      - name: Upload deployment package to S3
-        run: |
-          ARTIFACT_BUCKET=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='ArtifactBucketName'].OutputValue" --output text)
-          aws s3 cp deployment_package.zip s3://$ARTIFACT_BUCKET/deployment_package.zip
+
+          # Create the proper directory structure for CodeDeploy
+          mkdir -p codedeploy
+
+          # Process task definition template
+          sed "s|%IMAGE_URI%|${{ steps.build-image.outputs.image_uri }}|g" taskdef.template.json | \
+          sed "s|%EXECUTION_ROLE_ARN%|$EXECUTION_ROLE_ARN|g" | \
+          sed "s|%LOG_GROUP%|$LOG_GROUP|g" | \
+          sed "s|%AWS_REGION%|eu-central-1|g" > codedeploy/taskdef.json
+
+          # Copy appspec.yaml to codedeploy directory
+          cp appspec.yaml codedeploy/
+
+          # Zip the entire codedeploy directory (this creates the proper structure)
+          cd codedeploy && zip ../deployment_package.zip * && cd ..
