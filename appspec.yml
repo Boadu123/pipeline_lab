@@ -4,7 +4,7 @@ Resources:
   - TargetService:
       Type: AWS::ECS::Service
       Properties:
-        TaskDefinition: <TASK_DEFINITION>
+        TaskDefinition: <arn:aws:ecs:eu-central-1:677276091734:task-definition/pipeline-lab-task:1>
         LoadBalancerInfo:
           ContainerName: "project-app"
           ContainerPort: 8080
