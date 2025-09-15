@@ -55,17 +55,14 @@ jobs:
           EXECUTION_ROLE_ARN=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='TaskExecutionRoleArn'].OutputValue" --output text)
           LOG_GROUP=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='LogGroupName'].OutputValue" --output text)
 
-          # Create the proper directory structure for CodeDeploy
-          mkdir -p codedeploy
-
-          # Process task definition template
+          # Process task definition template and save to current directory
           sed "s|%IMAGE_URI%|${{ steps.build-image.outputs.image_uri }}|g" taskdef.template.json | \
           sed "s|%EXECUTION_ROLE_ARN%|$EXECUTION_ROLE_ARN|g" | \
           sed "s|%LOG_GROUP%|$LOG_GROUP|g" | \
-          sed "s|%AWS_REGION%|eu-central-1|g" > codedeploy/taskdef.json
+          sed "s|%AWS_REGION%|eu-central-1|g" > taskdef.json
 
-          # Copy appspec.yaml to codedeploy directory
-          cp appspec.yaml codedeploy/
+          # Zip both files at the root level (no subdirectory)
+          zip deployment_package.zip appspec.yaml taskdef.json
 
-          # Zip the entire codedeploy directory (this creates the proper structure)
-          cd codedeploy && zip ../deployment_package.zip * && cd ..
+          # Clean up the temporary taskdef.json if needed
+          # rm -f taskdef.json
