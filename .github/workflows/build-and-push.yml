@@ -50,19 +50,19 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           echo "image_uri=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
           
-      - name: Create deployment package
+      - name: Create and Verify Deployment Package
         run: |
           EXECUTION_ROLE_ARN=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='TaskExecutionRoleArn'].OutputValue" --output text)
           LOG_GROUP=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='LogGroupName'].OutputValue" --output text)
-
-          # Process task definition template and save to current directory
-          sed "s|%IMAGE_URI%|${{ steps.build-image.outputs.image_uri }}|g" taskdef.template.json | \
-          sed "s|%EXECUTION_ROLE_ARN%|$EXECUTION_ROLE_ARN|g" | \
-          sed "s|%LOG_GROUP%|$LOG_GROUP|g" | \
-          sed "s|%AWS_REGION%|eu-central-1|g" > taskdef.json
-
-          # Zip both files at the root level (no subdirectory)
+          sed "s|%IMAGE_URI%|${{ steps.build-image.outputs.image_uri }}|g" taskdef.template.json | sed "s|%EXECUTION_ROLE_ARN%|$EXECUTION_ROLE_ARN|g" | sed "s|%LOG_GROUP%|$LOG_GROUP|g" | sed "s|%AWS_REGION%|eu-central-1|g" > taskdef.json
+          
           zip deployment_package.zip appspec.yaml taskdef.json
+          
+          echo "Verifying zip contents..."
+          unzip -l deployment_package.zip
+          # The output of the command above should show appspec.yaml and taskdef.json without any folders.
 
-          # Clean up the temporary taskdef.json if needed
-          # rm -f taskdef.json
+      - name: Upload Deployment Package to S3
+        run: |
+          ARTIFACT_BUCKET=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='ArtifactBucketName'].OutputValue" --output text)
+          aws s3 cp deployment_package.zip s3://$ARTIFACT_BUCKET/deployment_package.zip
