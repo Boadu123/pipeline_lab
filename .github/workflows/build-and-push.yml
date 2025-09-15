@@ -9,7 +9,7 @@ env:
   AWS_REGION: eu-central-1
 
 jobs:
-  build-and-deply:
+  build-and-deploy:
     name: Build and Deploy
     runs-on: ubuntu-latest
     permissions:
@@ -48,17 +48,13 @@ jobs:
         run: |
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          # This line makes the image URI available to later steps
           echo "image_uri=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
           
-          # --- NEW STEPS TO ADD ---
-          - name: Create deployment package
-          run: |
-          # Get dynamic values from your deployed CloudFormation stack
+      - name: Create deployment package
+        run: |
           EXECUTION_ROLE_ARN=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='TaskExecutionRoleArn'].OutputValue" --output text)
           LOG_GROUP=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='LogGroupName'].OutputValue" --output text)
           
-          # Replace placeholders in the template to create the final taskdef.json
           sed -i "s|%IMAGE_URI%|${{ steps.build-image.outputs.image_uri }}|g" taskdef.template.json
           sed -i "s|%EXECUTION_ROLE_ARN%|$EXECUTION_ROLE_ARN|g" taskdef.template.json
           sed -i "s|%LOG_GROUP%|$LOG_GROUP|g" taskdef.template.json
