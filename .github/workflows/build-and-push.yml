@@ -72,4 +72,3 @@ jobs:
         run: |
           ARTIFACT_BUCKET=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='ArtifactBucketName'].OutputValue" --output text)
           aws s3 cp deployment_package.zip s3://$ARTIFACT_BUCKET/deployment_package.zip
-        
