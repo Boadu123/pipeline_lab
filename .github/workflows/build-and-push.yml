@@ -72,9 +72,11 @@ jobs:
           # Get bucket name again
           ARTIFACT_BUCKET=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='ArtifactBucketName'].OutputValue" --output text)
 
-          # Download the package
+          # Download the package to a temporary directory to avoid file conflicts
+          mkdir -p temp_deployment
+          cd temp_deployment
           aws s3 cp s3://$ARTIFACT_BUCKET/deployment_package.zip .
-          unzip deployment_package.zip
+          unzip -o deployment_package.zip  # Use -o to overwrite without prompting
 
           # Update taskdef.json with actual image URI
           sed -e "s|%IMAGE_URI%|${{ steps.build-image.outputs.image_uri }}|g" \
@@ -84,3 +86,7 @@ jobs:
           # Re-zip and upload
           zip deployment_package.zip appspec.yaml taskdef.json
           aws s3 cp deployment_package.zip s3://$ARTIFACT_BUCKET/deployment_package.zip
+
+          # Clean up temporary directory
+          cd ..
+          rm -rf temp_deployment
