@@ -39,7 +39,7 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Build, tag, and push image to Amazon ECR
+      - name: Build Docker Image (BUT DON'T PUSH YET)
         id: build-image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
@@ -47,36 +47,81 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           echo "image_uri=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
-          
 
-      - name: Create, Verify, and Upload Deployment Package
+      - name: Create and Upload Deployment Package (WITH ACTUAL IMAGE URI)
         run: |
-          # 1. Substitute placeholders in the task definition template
-          # This command ensures that the output from the build-image step is correctly injected.
+          # Get AWS resource info from CloudFormation
+          EXECUTION_ROLE_ARN=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='TaskExecutionRoleArn'].OutputValue" --output text)
+          LOG_GROUP=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='LogGroupName'].OutputValue" --output text)
+          ARTIFACT_BUCKET=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='ArtifactBucketName'].OutputValue" --output text)
+
+          # Create taskdef.json WITH ACTUAL IMAGE URI (not placeholder)
           sed -e "s|%IMAGE_URI%|${{ steps.build-image.outputs.image_uri }}|g" \
-              -e "s|%EXECUTION_ROLE_ARN%|$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='TaskExecutionRoleArn'].OutputValue" --output text)|g" \
-              -e "s|%LOG_GROUP%|$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='LogGroupName'].OutputValue" --output text)|g" \
+              -e "s|%EXECUTION_ROLE_ARN%|$EXECUTION_ROLE_ARN|g" \
+              -e "s|%LOG_GROUP%|$LOG_GROUP|g" \
               -e "s|%AWS_REGION%|${{ env.AWS_REGION }}|g" \
               taskdef.template.json > taskdef.json
 
-          # 2. (Important for Debugging) Print the contents of the generated taskdef.json
+          # Verify the file was created correctly
           echo "--- Generated taskdef.json content: ---"
           cat taskdef.json
           echo "-------------------------------------"
 
-          # 3. Verify that the placeholder is gone. If it's still there, fail the build.
           if grep -q "%IMAGE_URI%" taskdef.json; then
             echo "Error: Placeholder %IMAGE_URI% was not replaced."
             exit 1
           fi
 
-          # 4. Package the deployment files into a zip archive
+          # Upload to S3 with COMPLETE deployment package
           zip deployment_package.zip appspec.yaml taskdef.json
-
-          # 5. Get the artifact bucket name from CloudFormation outputs
-          ARTIFACT_BUCKET=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='ArtifactBucketName'].OutputValue" --output text)
-
-          # 6. Upload the deployment package to S3
           aws s3 cp deployment_package.zip s3://$ARTIFACT_BUCKET/deployment_package.zip
+
+      - name: Push Docker Image to ECR (TRIGGERS PIPELINE)
+        run: |
+          # Now push the image we built earlier
+          docker push ${{ steps.build-image.outputs.image_uri }}
+
+#      - name: Build, tag, and push image to Amazon ECR
+#        id: build-image
+#        env:
+#          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+#          ECR_REPOSITORY: 'my-project-app'
+#          IMAGE_TAG: ${{ github.sha }}
+#        run: |
+#          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+#          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+#          echo "image_uri=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+#
+#
+#      - name: Create, Verify, and Upload Deployment Package
+#        run: |
+#          # 1. Substitute placeholders in the task definition template
+#          # This command ensures that the output from the build-image step is correctly injected.
+#          sed -e "s|%IMAGE_URI%|${{ steps.build-image.outputs.image_uri }}|g" \
+#              -e "s|%EXECUTION_ROLE_ARN%|$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='TaskExecutionRoleArn'].OutputValue" --output text)|g" \
+#              -e "s|%LOG_GROUP%|$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='LogGroupName'].OutputValue" --output text)|g" \
+#              -e "s|%AWS_REGION%|${{ env.AWS_REGION }}|g" \
+#              taskdef.template.json > taskdef.json
+#
+#          # 2. (Important for Debugging) Print the contents of the generated taskdef.json
+#          echo "--- Generated taskdef.json content: ---"
+#          cat taskdef.json
+#          echo "-------------------------------------"
+#
+#          # 3. Verify that the placeholder is gone. If it's still there, fail the build.
+#          if grep -q "%IMAGE_URI%" taskdef.json; then
+#            echo "Error: Placeholder %IMAGE_URI% was not replaced."
+#            exit 1
+#          fi
+#
+#          # 4. Package the deployment files into a zip archive
+#          zip deployment_package.zip appspec.yaml taskdef.json
+#
+#          # 5. Get the artifact bucket name from CloudFormation outputs
+#          ARTIFACT_BUCKET=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='ArtifactBucketName'].OutputValue" --output text)
+#
+#          # 6. Upload the deployment package to S3
+#          aws s3 cp deployment_package.zip s3://$ARTIFACT_BUCKET/deployment_package.zip
+
+
