@@ -39,23 +39,6 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Create, Verify, and Upload Deployment Package
-        run: |
-          # Get CloudFormation outputs first
-          EXECUTION_ROLE_ARN=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='TaskExecutionRoleArn'].OutputValue" --output text)
-          LOG_GROUP=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='LogGroupName'].OutputValue" --output text)
-          ARTIFACT_BUCKET=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='ArtifactBucketName'].OutputValue" --output text)
-
-          # Create taskdef.json with placeholder (will be replaced after build)
-          sed -e "s|%EXECUTION_ROLE_ARN%|$EXECUTION_ROLE_ARN|g" \
-              -e "s|%LOG_GROUP%|$LOG_GROUP|g" \
-              -e "s|%AWS_REGION%|${{ env.AWS_REGION }}|g" \
-              taskdef.template.json > taskdef.json
-
-          # Upload deployment package with placeholder FIRST
-          zip deployment_package.zip appspec.yaml taskdef.json
-          aws s3 cp deployment_package.zip s3://$ARTIFACT_BUCKET/deployment_package.zip
-
       - name: Build, tag, and push image to Amazon ECR
         id: build-image
         env:
@@ -66,27 +49,34 @@ jobs:
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           echo "image_uri=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          
 
-      - name: Update Deployment Package with Actual Image URI
+      - name: Create, Verify, and Upload Deployment Package
         run: |
-          # Get bucket name again
+          # 1. Substitute placeholders in the task definition template
+          # This command ensures that the output from the build-image step is correctly injected.
+          sed -e "s|%IMAGE_URI%|${{ steps.build-image.outputs.image_uri }}|g" \
+              -e "s|%EXECUTION_ROLE_ARN%|$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='TaskExecutionRoleArn'].OutputValue" --output text)|g" \
+              -e "s|%LOG_GROUP%|$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='LogGroupName'].OutputValue" --output text)|g" \
+              -e "s|%AWS_REGION%|${{ env.AWS_REGION }}|g" \
+              taskdef.template.json > taskdef.json
+
+          # 2. (Important for Debugging) Print the contents of the generated taskdef.json
+          echo "--- Generated taskdef.json content: ---"
+          cat taskdef.json
+          echo "-------------------------------------"
+
+          # 3. Verify that the placeholder is gone. If it's still there, fail the build.
+          if grep -q "%IMAGE_URI%" taskdef.json; then
+            echo "Error: Placeholder %IMAGE_URI% was not replaced."
+            exit 1
+          fi
+
+          # 4. Package the deployment files into a zip archive
+          zip deployment_package.zip appspec.yaml taskdef.json
+
+          # 5. Get the artifact bucket name from CloudFormation outputs
           ARTIFACT_BUCKET=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='ArtifactBucketName'].OutputValue" --output text)
 
-          # Download the package to a temporary directory to avoid file conflicts
-          mkdir -p temp_deployment
-          cd temp_deployment
-          aws s3 cp s3://$ARTIFACT_BUCKET/deployment_package.zip .
-          unzip -o deployment_package.zip  # Use -o to overwrite without prompting
-
-          # Update taskdef.json with actual image URI
-          sed -e "s|%IMAGE_URI%|${{ steps.build-image.outputs.image_uri }}|g" \
-              taskdef.json > taskdef_updated.json
-          mv taskdef_updated.json taskdef.json
-
-          # Re-zip and upload
-          zip deployment_package.zip appspec.yaml taskdef.json
+          # 6. Upload the deployment package to S3
           aws s3 cp deployment_package.zip s3://$ARTIFACT_BUCKET/deployment_package.zip
-
-          # Clean up temporary directory
-          cd ..
-          rm -rf temp_deployment
