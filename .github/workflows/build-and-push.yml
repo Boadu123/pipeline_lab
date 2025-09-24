@@ -74,7 +74,7 @@ jobs:
               -e "s|%DB_SECRET_ARN%|$DB_SECRET_ARN|g" \
               -e "s|%S3_BUCKET_NAME%|$S3_BUCKET_NAME|g" \
               -e "s|%CLOUDFRONT_DOMAIN%|$CLOUDFRONT_DOMAIN|g" \
-              taskdef.json > taskdef.json
+              taskdef.json 
 
           # Verify taskdef.json
           echo "--- Generated taskdef.json content: ---"
