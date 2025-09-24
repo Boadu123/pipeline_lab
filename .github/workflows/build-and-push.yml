@@ -64,7 +64,7 @@ jobs:
           CLOUDFRONT_DOMAIN=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDomain'].OutputValue" --output text)
 
           # Create taskdef.json WITH ACTUAL IMAGE URI + values from CloudFormation
-          sed -i -e "s|%IMAGE_URI%|${{ steps.build-image.outputs.image_uri }}|g" \
+          sed -e "s|%IMAGE_URI%|${{ steps.build-image.outputs.image_uri }}|g" \
               -e "s|%EXECUTION_ROLE_ARN%|$EXECUTION_ROLE_ARN|g" \
               -e "s|%LOG_GROUP%|$LOG_GROUP|g" \
               -e "s|%AWS_REGION%|${{ env.AWS_REGION }}|g" \
@@ -74,7 +74,7 @@ jobs:
               -e "s|%DB_SECRET_ARN%|$DB_SECRET_ARN|g" \
               -e "s|%S3_BUCKET_NAME%|$S3_BUCKET_NAME|g" \
               -e "s|%CLOUDFRONT_DOMAIN%|$CLOUDFRONT_DOMAIN|g" \
-              taskdef.json 
+              taskdef.template.json > taskdef.json
 
           # Verify taskdef.json
           echo "--- Generated taskdef.json content: ---"
