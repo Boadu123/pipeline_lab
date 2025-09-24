@@ -1,41 +1,46 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Lab Project</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background: #f5f7fa;
-            margin: 0;
-            padding: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-        }
-        .container {
-            background: white;
-            padding: 2rem 3rem;
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            text-align: center;
-        }
-        h1 {
-            font-size: 1.8rem;
-            color: #2c3e50;
-            margin-bottom: 0.5rem;
-        }
-        h2 {
-            font-size: 1.2rem;
-            color: #34495e;
-            font-weight: 500;
-        }
-    </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photo Gallery</title>
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <div class="container">
-    <h1>Full Name: Benedict Boadu-Boateng </h1>
-    <h2>Lab Name: ECS Blue/Green Deployment V2</h2>
+    <header>
+        <h1>📷 Photo Gallery</h1>
+        <p>Upload and share your favorite moments</p>
+    </header>
+
+    <!-- Upload Section -->
+    <section class="upload-section">
+        <h2>Upload New Photo</h2>
+        <form id="uploadForm" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="photoFile">Choose Photo:</label>
+                <input type="file" id="photoFile" name="file" accept="image/*" required>
+            </div>
+            <div class="form-group">
+                <label for="photoDescription">Description:</label>
+                <textarea id="photoDescription" name="description" placeholder="Describe your photo..." required></textarea>
+            </div>
+            <button type="submit" id="uploadBtn">Upload Photo</button>
+            <div id="uploadStatus" class="status-message"></div>
+        </form>
+    </section>
+
+    <!-- Gallery Section -->
+    <section class="gallery-section">
+        <h2>Photo Gallery</h2>
+        <div id="loadingMessage" class="loading">Loading photos...</div>
+        <div id="gallery" class="gallery-grid"></div>
+        <div id="emptyMessage" class="empty-state" style="display: none;">
+            <p>No photos yet. Be the first to upload one!</p>
+        </div>
+    </section>
 </div>
+
+<script src="script.js"></script>
 </body>
 </html>

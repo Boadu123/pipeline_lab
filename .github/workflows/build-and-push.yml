@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - "main"
+
 env:
   AWS_REGION: eu-central-1
 
@@ -49,35 +50,46 @@ jobs:
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
           echo "image_uri=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-      - name: Create and Upload Deployment Package (WITH ACTUAL IMAGE URI)
+      - name: Create and Upload Deployment Package (WITH ACTUAL IMAGE URI + STACK OUTPUTS)
         run: |
           # Get AWS resource info from CloudFormation
           EXECUTION_ROLE_ARN=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='TaskExecutionRoleArn'].OutputValue" --output text)
           LOG_GROUP=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='LogGroupName'].OutputValue" --output text)
           ARTIFACT_BUCKET=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='ArtifactBucketName'].OutputValue" --output text)
 
-          # Create taskdef.json WITH ACTUAL IMAGE URI (not placeholder)
+          # 🔹 Fetch new outputs required by your app
+          DB_HOST=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='DBHost'].OutputValue" --output text)
+          DB_SECRET_ARN=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='DBSecretArn'].OutputValue" --output text)
+          S3_BUCKET_NAME=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='S3BucketName'].OutputValue" --output text)
+          CLOUDFRONT_DOMAIN=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDomain'].OutputValue" --output text)
+
+          # Create taskdef.json WITH ACTUAL IMAGE URI + values from CloudFormation
           sed -e "s|%IMAGE_URI%|${{ steps.build-image.outputs.image_uri }}|g" \
               -e "s|%EXECUTION_ROLE_ARN%|$EXECUTION_ROLE_ARN|g" \
               -e "s|%LOG_GROUP%|$LOG_GROUP|g" \
               -e "s|%AWS_REGION%|${{ env.AWS_REGION }}|g" \
-              taskdef.template.json > taskdef.json
+              -e "s|%DB_HOST%|$DB_HOST|g" \
+              -e "s|%DB_PORT%|5432|g" \
+              -e "s|%DB_NAME%|postgres|g" \
+              -e "s|%DB_SECRET_ARN%|$DB_SECRET_ARN|g" \
+              -e "s|%S3_BUCKET_NAME%|$S3_BUCKET_NAME|g" \
+              -e "s|%CLOUDFRONT_DOMAIN%|$CLOUDFRONT_DOMAIN|g" \
+              taskdef.json > taskdef.json
 
-          # Verify the file was created correctly
+          # Verify taskdef.json
           echo "--- Generated taskdef.json content: ---"
           cat taskdef.json
           echo "-------------------------------------"
 
-          if grep -q "%IMAGE_URI%" taskdef.json; then
-            echo "Error: Placeholder %IMAGE_URI% was not replaced."
+          if grep -q "%" taskdef.json; then
+            echo "Error: Some placeholders were not replaced."
             exit 1
           fi
 
-          # Upload to S3 with COMPLETE deployment package
+          # Upload deployment package to S3
           zip deployment_package.zip appspec.yaml taskdef.json
           aws s3 cp deployment_package.zip s3://$ARTIFACT_BUCKET/deployment_package.zip
 
       - name: Push Docker Image to ECR (TRIGGERS PIPELINE)
         run: |
-          # Now push the image we built earlier
           docker push ${{ steps.build-image.outputs.image_uri }}

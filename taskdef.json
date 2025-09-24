@@ -1,0 +1,56 @@
+{
+  "family": "project-app-task",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "networkMode": "awsvpc",
+  "executionRoleArn": "arn:aws:iam::771826808190:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "project-app",
+      "image": "771826808190.dkr.ecr.eu-central-1.amazonaws.com/my-project-app:8a9f3c7",
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "DB_HOST",
+          "value": "project-db-instance.cle2abcxyz.eu-central-1.rds.amazonaws.com"
+        },
+        {
+          "name": "DB_PORT",
+          "value": "5432"
+        },
+        {
+          "name": "DB_NAME",
+          "value": "postgres"
+        },
+        {
+          "name": "S3_BUCKET_NAME",
+          "value": "benedict-photo-uploads-bucket"
+        },
+        {
+          "name": "CLOUDFRONT_DOMAIN",
+          "value": "d123example.cloudfront.net"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "DB_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:eu-central-1:771826808190:secret:benedict-db-credentials-abc123"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/project-app",
+          "awslogs-region": "eu-central-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}
