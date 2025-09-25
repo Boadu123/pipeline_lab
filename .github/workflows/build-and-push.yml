@@ -55,52 +55,74 @@ jobs:
       - name: Get CloudFormation Stack Outputs
         id: stack-outputs
         run: |
-          # Get all stack outputs
-          OUTPUTS=$(aws cloudformation describe-stacks --stack-name ${{ env.STACK_NAME }} --query "Stacks[0].Outputs[].[OutputKey,OutputValue]" --output text)
+          # Install jq for proper JSON parsing
+          sudo apt-get update && sudo apt-get install -y jq
           
-          # Parse each output and set as environment variable
-          while read -r key value; do
-            echo "$key=$value" >> $GITHUB_ENV
-            echo "FOUND: $key = $value"
-          done <<< "$OUTPUTS"
+          # Get stack outputs in JSON format
+          OUTPUTS_JSON=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.STACK_NAME }} \
+            --query "Stacks[0].Outputs" \
+            --output json)
           
-          # Verify required outputs exist
-          REQUIRED_OUTPUTS=("TaskExecutionRoleArn" "TaskRoleArn" "LogGroupName" "ArtifactBucketName" "DBHost" "DBSecretArn" "S3BucketName" "CloudFrontDomain")
-          for output in "${REQUIRED_OUTPUTS[@]}"; do
-            if [ -z "${!output}" ]; then
-              echo "ERROR: Missing required output: $output"
-              exit 1
-            fi
-          done
+          echo "Raw outputs JSON:"
+          echo "$OUTPUTS_JSON"
+          
+          # Parse each output using jq
+          ARTIFACT_BUCKET=$(echo "$OUTPUTS_JSON" | jq -r '.[] | select(.OutputKey=="ArtifactBucketName") | .OutputValue')
+          TASK_EXECUTION_ROLE_ARN=$(echo "$OUTPUTS_JSON" | jq -r '.[] | select(.OutputKey=="TaskExecutionRoleArn") | .OutputValue')
+          TASK_ROLE_ARN=$(echo "$OUTPUTS_JSON" | jq -r '.[] | select(.OutputKey=="TaskRoleArn") | .OutputValue')
+          LOG_GROUP=$(echo "$OUTPUTS_JSON" | jq -r '.[] | select(.OutputKey=="LogGroupName") | .OutputValue')
+          DB_HOST=$(echo "$OUTPUTS_JSON" | jq -r '.[] | select(.OutputKey=="DBHost") | .OutputValue')
+          DB_SECRET_ARN=$(echo "$OUTPUTS_JSON" | jq -r '.[] | select(.OutputKey=="DBSecretArn") | .OutputValue')
+          S3_BUCKET_NAME=$(echo "$OUTPUTS_JSON" | jq -r '.[] | select(.OutputKey=="S3BucketName") | .OutputValue')
+          CLOUDFRONT_DOMAIN=$(echo "$OUTPUTS_JSON" | jq -r '.[] | select(.OutputKey=="CloudFrontDomain") | .OutputValue')
+          
+          # Set environment variables
+          echo "ARTIFACT_BUCKET=$ARTIFACT_BUCKET" >> $GITHUB_ENV
+          echo "TASK_EXECUTION_ROLE_ARN=$TASK_EXECUTION_ROLE_ARN" >> $GITHUB_ENV
+          echo "TASK_ROLE_ARN=$TASK_ROLE_ARN" >> $GITHUB_ENV
+          echo "LOG_GROUP=$LOG_GROUP" >> $GITHUB_ENV
+          echo "DB_HOST=$DB_HOST" >> $GITHUB_ENV
+          echo "DB_SECRET_ARN=$DB_SECRET_ARN" >> $GITHUB_ENV
+          echo "S3_BUCKET_NAME=$S3_BUCKET_NAME" >> $GITHUB_ENV
+          echo "CLOUDFRONT_DOMAIN=$CLOUDFRONT_DOMAIN" >> $GITHUB_ENV
+          
+          # Debug output
+          echo "=== Captured Outputs ==="
+          echo "ARTIFACT_BUCKET: $ARTIFACT_BUCKET"
+          echo "TASK_EXECUTION_ROLE_ARN: $TASK_EXECUTION_ROLE_ARN"
+          echo "TASK_ROLE_ARN: $TASK_ROLE_ARN"
+          echo "LOG_GROUP: $LOG_GROUP"
+          echo "DB_HOST: $DB_HOST"
+          echo "DB_SECRET_ARN: $DB_SECRET_ARN"
+          echo "S3_BUCKET_NAME: $S3_BUCKET_NAME"
+          echo "CLOUDFRONT_DOMAIN: $CLOUDFRONT_DOMAIN"
+          
+          # Verify critical outputs
+          if [ -z "$TASK_EXECUTION_ROLE_ARN" ] || [ "$TASK_EXECUTION_ROLE_ARN" = "null" ]; then
+            echo "ERROR: Missing TaskExecutionRoleArn"
+            exit 1
+          fi
+          if [ -z "$ARTIFACT_BUCKET" ] || [ "$ARTIFACT_BUCKET" = "null" ]; then
+            echo "ERROR: Missing ArtifactBucketName"
+            exit 1
+          fi
 
       - name: Create Deployment Package
         run: |
-          # Create dynamic appspec.yaml
-          cat > appspec.yaml << EOF
-          version: 0.0
-          Resources:
-            - TargetService:
-                Type: AWS::ECS::Service
-                Properties:
-                  TaskDefinition: "<TASK_DEFINITION>"
-                  LoadBalancerInfo:
-                    ContainerName: "project-app"
-                    ContainerPort: 8080
-          EOF
-
           # Replace placeholders in taskdef.json
           sed -i \
             -e "s|%IMAGE_URI%|${{ steps.build-image.outputs.image_uri }}|g" \
-            -e "s|%EXECUTION_ROLE_ARN%|${{ env.TaskExecutionRoleArn }}|g" \
-            -e "s|%TASK_ROLE_ARN%|${{ env.TaskRoleArn }}|g" \
-            -e "s|%LOG_GROUP%|${{ env.LogGroupName }}|g" \
+            -e "s|%EXECUTION_ROLE_ARN%|${{ env.TASK_EXECUTION_ROLE_ARN }}|g" \
+            -e "s|%TASK_ROLE_ARN%|${{ env.TASK_ROLE_ARN }}|g" \
+            -e "s|%LOG_GROUP%|${{ env.LOG_GROUP }}|g" \
             -e "s|%AWS_REGION%|${{ env.AWS_REGION }}|g" \
-            -e "s|%DB_HOST%|${{ env.DBHost }}|g" \
+            -e "s|%DB_HOST%|${{ env.DB_HOST }}|g" \
             -e "s|%DB_PORT%|5432|g" \
             -e "s|%DB_NAME%|postgres|g" \
-            -e "s|%DB_SECRET_ARN%|${{ env.DBSecretArn }}|g" \
-            -e "s|%S3_BUCKET_NAME%|${{ env.S3BucketName }}|g" \
-            -e "s|%CLOUDFRONT_DOMAIN%|${{ env.CloudFrontDomain }}|g" \
+            -e "s|%DB_SECRET_ARN%|${{ env.DB_SECRET_ARN }}|g" \
+            -e "s|%S3_BUCKET_NAME%|${{ env.S3_BUCKET_NAME }}|g" \
+            -e "s|%CLOUDFRONT_DOMAIN%|${{ env.CLOUDFRONT_DOMAIN }}|g" \
             taskdef.json
 
           # Verify files
@@ -108,14 +130,15 @@ jobs:
           cat appspec.yaml
           echo "=== taskdef.json ==="
           cat taskdef.json
-          echo "===================="
-
+          echo "=== Checking for unreplaced placeholders ==="
+          
           # Check for unreplaced placeholders
           if grep -q "%" taskdef.json; then
-            echo "ERROR: Unreplaced placeholders found in taskdef.json"
-            grep "%" taskdef.json
+            echo "ERROR: Unreplaced placeholders found in taskdef.json:"
+            grep -n "%" taskdef.json
             exit 1
           fi
+          echo "✓ All placeholders replaced successfully"
 
       - name: Upload Deployment Package to S3
         run: |
@@ -123,9 +146,9 @@ jobs:
           zip deployment_package.zip appspec.yaml taskdef.json
           
           # Upload to S3
-          aws s3 cp deployment_package.zip s3://${{ env.ArtifactBucketName }}/deployment_package.zip
+          aws s3 cp deployment_package.zip s3://${{ env.ARTIFACT_BUCKET }}/deployment_package.zip
           
-          echo "Deployment package uploaded to S3"
+          echo "✓ Deployment package uploaded to S3: ${{ env.ARTIFACT_BUCKET }}"
 
       - name: Push Docker Images to ECR
         run: |
@@ -133,6 +156,6 @@ jobs:
           docker push ${{ steps.build-image.outputs.image_uri }}
           docker push ${{ steps.build-image.outputs.image_uri_latest }}
           
-          echo "Images pushed to ECR:"
-          echo "- ${{ steps.build-image.outputs.image_uri }}"
-          echo "- ${{ steps.build-image.outputs.image_uri_latest }}"
+          echo "✓ Images pushed to ECR:"
+          echo "  - ${{ steps.build-image.outputs.image_uri }}"
+          echo "  - ${{ steps.build-image.outputs.image_uri_latest }}"
