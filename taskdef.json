@@ -42,11 +42,11 @@
       "secrets": [
         {
           "name": "DB_USERNAME",
-          "valueFrom": "%DB_SECRET_ARN%:username"
+          "valueFrom": "%DB_SECRET_ARN%:username::"
         },
         {
           "name": "DB_PASSWORD",
-          "valueFrom": "%DB_SECRET_ARN%:password"
+          "valueFrom": "%DB_SECRET_ARN%:password::"
         }
       ],
       "logConfiguration": {
