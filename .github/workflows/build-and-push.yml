@@ -1,12 +1,13 @@
-# Name of your GitHub Actions Workflow
-name: Build, Push, and Prepare for Deploy
+name: Build, Push, and Deploy
 
 on:
   push:
     branches:
       - "main"
+
 env:
   AWS_REGION: eu-central-1
+  STACK_NAME: benedictPipeline-stack
 
 jobs:
   build-and-deploy:
@@ -33,13 +34,13 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v2
         with:
           role-to-assume: 'arn:aws:iam::771826808190:role/YourGitHubOidcRoleName'
-          aws-region: 'eu-central-1'
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Build Docker Image (BUT DON'T PUSH YET)
+      - name: Build Docker Image
         id: build-image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
@@ -47,54 +48,91 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
           echo "image_uri=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "image_uri_latest=$ECR_REGISTRY/$ECR_REPOSITORY:latest" >> $GITHUB_OUTPUT
 
-      - name: Create and Upload Deployment Package (WITH ACTUAL IMAGE URI + STACK OUTPUTS)
+      - name: Get CloudFormation Stack Outputs
+        id: stack-outputs
         run: |
-          # Get AWS resource info from CloudFormation
-          EXECUTION_ROLE_ARN=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='TaskExecutionRoleArn'].OutputValue" --output text)
-          LOG_GROUP=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='LogGroupName'].OutputValue" --output text)
-          ARTIFACT_BUCKET=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='ArtifactBucketName'].OutputValue" --output text)
+          # Get all stack outputs
+          OUTPUTS=$(aws cloudformation describe-stacks --stack-name ${{ env.STACK_NAME }} --query "Stacks[0].Outputs[].[OutputKey,OutputValue]" --output text)
+          
+          # Parse each output and set as environment variable
+          while read -r key value; do
+            echo "$key=$value" >> $GITHUB_ENV
+            echo "FOUND: $key = $value"
+          done <<< "$OUTPUTS"
+          
+          # Verify required outputs exist
+          REQUIRED_OUTPUTS=("TaskExecutionRoleArn" "TaskRoleArn" "LogGroupName" "ArtifactBucketName" "DBHost" "DBSecretArn" "S3BucketName" "CloudFrontDomain")
+          for output in "${REQUIRED_OUTPUTS[@]}"; do
+            if [ -z "${!output}" ]; then
+              echo "ERROR: Missing required output: $output"
+              exit 1
+            fi
+          done
 
-          # 🔹 Fetch new outputs required by your app
-          DB_HOST=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='DBHost'].OutputValue" --output text)
-          DB_SECRET_ARN=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='DBSecretArn'].OutputValue" --output text)
-          S3_BUCKET_NAME=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='S3BucketName'].OutputValue" --output text)
-          CLOUDFRONT_DOMAIN=$(aws cloudformation describe-stacks --stack-name benedictPipeline-stack --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDomain'].OutputValue" --output text)
+      - name: Create Deployment Package
+        run: |
+          # Create dynamic appspec.yaml
+          cat > appspec.yaml << EOF
+          version: 0.0
+          Resources:
+            - TargetService:
+                Type: AWS::ECS::Service
+                Properties:
+                  TaskDefinition: "<TASK_DEFINITION>"
+                  LoadBalancerInfo:
+                    ContainerName: "project-app"
+                    ContainerPort: 8080
+          EOF
 
-          # Create taskdef.json WITH ACTUAL IMAGE URI + values from CloudFormation
-          sed -i -e "s|%IMAGE_URI%|${{ steps.build-image.outputs.image_uri }}|g" \
-              -e "s|%EXECUTION_ROLE_ARN%|$EXECUTION_ROLE_ARN|g" \
-              -e "s|%LOG_GROUP%|$LOG_GROUP|g" \
-              -e "s|%AWS_REGION%|${{ env.AWS_REGION }}|g" \
-              -e "s|%DB_HOST%|$DB_HOST|g" \
-              -e "s|%DB_PORT%|5432|g" \
-              -e "s|%DB_NAME%|postgres|g" \
-              -e "s|%DB_SECRET_ARN%|$DB_SECRET_ARN|g" \
-              -e "s|%S3_BUCKET_NAME%|$S3_BUCKET_NAME|g" \
-              -e "s|%CLOUDFRONT_DOMAIN%|$CLOUDFRONT_DOMAIN|g" \
-              taskdef.json
+          # Replace placeholders in taskdef.json
+          sed -i \
+            -e "s|%IMAGE_URI%|${{ steps.build-image.outputs.image_uri }}|g" \
+            -e "s|%EXECUTION_ROLE_ARN%|${{ env.TaskExecutionRoleArn }}|g" \
+            -e "s|%TASK_ROLE_ARN%|${{ env.TaskRoleArn }}|g" \
+            -e "s|%LOG_GROUP%|${{ env.LogGroupName }}|g" \
+            -e "s|%AWS_REGION%|${{ env.AWS_REGION }}|g" \
+            -e "s|%DB_HOST%|${{ env.DBHost }}|g" \
+            -e "s|%DB_PORT%|5432|g" \
+            -e "s|%DB_NAME%|postgres|g" \
+            -e "s|%DB_SECRET_ARN%|${{ env.DBSecretArn }}|g" \
+            -e "s|%S3_BUCKET_NAME%|${{ env.S3BucketName }}|g" \
+            -e "s|%CLOUDFRONT_DOMAIN%|${{ env.CloudFrontDomain }}|g" \
+            taskdef.json
 
-          # Verify taskdef.json
-          echo "--- Generated taskdef.json content: ---"
+          # Verify files
+          echo "=== appspec.yaml ==="
+          cat appspec.yaml
+          echo "=== taskdef.json ==="
           cat taskdef.json
-          echo "-------------------------------------"
+          echo "===================="
 
+          # Check for unreplaced placeholders
           if grep -q "%" taskdef.json; then
-            echo "Error: Some placeholders were not replaced."
+            echo "ERROR: Unreplaced placeholders found in taskdef.json"
+            grep "%" taskdef.json
             exit 1
           fi
 
-          # Upload deployment package to S3
-          zip deployment_package.zip appspec.yaml taskdef.json
-          aws s3 cp deployment_package.zip s3://$ARTIFACT_BUCKET/deployment_package.zip
-
-      - name: Push Docker Image to ECR (TRIGGERS PIPELINE)
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: my-project-app
+      - name: Upload Deployment Package to S3
         run: |
-          docker tag ${{ steps.build-image.outputs.image_uri }} $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          # Create deployment package
+          zip deployment_package.zip appspec.yaml taskdef.json
+          
+          # Upload to S3
+          aws s3 cp deployment_package.zip s3://${{ env.ArtifactBucketName }}/deployment_package.zip
+          
+          echo "Deployment package uploaded to S3"
+
+      - name: Push Docker Images to ECR
+        run: |
+          # Push both SHA and latest tags
           docker push ${{ steps.build-image.outputs.image_uri }}
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
-      
+          docker push ${{ steps.build-image.outputs.image_uri_latest }}
+          
+          echo "Images pushed to ECR:"
+          echo "- ${{ steps.build-image.outputs.image_uri }}"
+          echo "- ${{ steps.build-image.outputs.image_uri_latest }}"

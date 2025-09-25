@@ -4,50 +4,56 @@
   "cpu": "256",
   "memory": "512",
   "networkMode": "awsvpc",
-  "executionRoleArn": "arn:aws:iam::771826808190:role/ecsTaskExecutionRole",
+  "executionRoleArn": "%EXECUTION_ROLE_ARN%",
+  "taskRoleArn": "%TASK_ROLE_ARN%",
   "containerDefinitions": [
     {
       "name": "project-app",
-      "image": "771826808190.dkr.ecr.eu-central-1.amazonaws.com/my-project-app:8a9f3c7",
+      "image": "%IMAGE_URI%",
       "portMappings": [
         {
           "containerPort": 8080,
           "protocol": "tcp"
         }
       ],
+      "essential": true,
       "environment": [
         {
           "name": "DB_HOST",
-          "value": "project-db-instance.cle2abcxyz.eu-central-1.rds.amazonaws.com"
+          "value": "%DB_HOST%"
         },
         {
           "name": "DB_PORT",
-          "value": "5432"
+          "value": "%DB_PORT%"
         },
         {
           "name": "DB_NAME",
-          "value": "postgres"
+          "value": "%DB_NAME%"
         },
         {
           "name": "S3_BUCKET_NAME",
-          "value": "benedict-photo-uploads-bucket"
+          "value": "%S3_BUCKET_NAME%"
         },
         {
           "name": "CLOUDFRONT_DOMAIN",
-          "value": "d123example.cloudfront.net"
+          "value": "%CLOUDFRONT_DOMAIN%"
         }
       ],
       "secrets": [
         {
-          "name": "DB_SECRET",
-          "valueFrom": "arn:aws:secretsmanager:eu-central-1:771826808190:secret:benedict-db-credentials-abc123"
+          "name": "DB_USERNAME",
+          "valueFrom": "%DB_SECRET_ARN%:username::"
+        },
+        {
+          "name": "DB_PASSWORD",
+          "valueFrom": "%DB_SECRET_ARN%:password::"
         }
       ],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
-          "awslogs-group": "/ecs/project-app",
-          "awslogs-region": "eu-central-1",
+          "awslogs-group": "%LOG_GROUP%",
+          "awslogs-region": "%AWS_REGION%",
           "awslogs-stream-prefix": "ecs"
         }
       }

@@ -1,10 +1,9 @@
-# appspec.yaml
 version: 0.0
 Resources:
   - TargetService:
       Type: AWS::ECS::Service
       Properties:
-        TaskDefinition: "taskDefinition"
+        TaskDefinition: "<TASK_DEFINITION>"
         LoadBalancerInfo:
           ContainerName: "project-app"
           ContainerPort: 8080
