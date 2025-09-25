@@ -90,5 +90,11 @@ jobs:
           aws s3 cp deployment_package.zip s3://$ARTIFACT_BUCKET/deployment_package.zip
 
       - name: Push Docker Image to ECR (TRIGGERS PIPELINE)
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: my-project-app
         run: |
+          docker tag ${{ steps.build-image.outputs.image_uri }} $ECR_REGISTRY/$ECR_REPOSITORY:latest
           docker push ${{ steps.build-image.outputs.image_uri }}
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+      
